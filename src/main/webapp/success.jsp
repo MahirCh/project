@@ -10,6 +10,7 @@ You are not logged in<br/>
 return;
 }
 String role=(String)session.getAttribute("role");
+
 %>
 
 <!DOCTYPE html>
@@ -155,7 +156,40 @@ String role=(String)session.getAttribute("role");
     <a href='Questions.jsp'>Q&A</a>
 </div>
 
-<% if("customer_rep".equals(role)){ %>
+
+
+
+<% 
+String user= (String)session.getAttribute("user");
+Class.forName("com.mysql.jdbc.Driver");
+Connection con = DriverManager.getConnection(
+    "jdbc:mysql://localhost:3306/projectdb","root","school"
+);
+PreparedStatement ps;
+ResultSet rs;
+    ps = con.prepareStatement(
+        "SELECT alert_id, message, created_at " +
+        "FROM alert WHERE username = ?"
+    );
+    ps.setString(1, user);
+    rs = ps.executeQuery();
+while(rs.next()){
+    out.println("<table border='1'><tr><th>Alert</th><th>Message</th><th>Timestamp</th></tr>");
+    
+        out.println("<tr>");
+        out.println("<td>" + rs.getInt("alert_id") + "</td>");
+        out.println("<td>" + rs.getString("message") + "</td>");
+        out.println("<td>" + rs.getString("created_at") + "</td>");
+        out.println("</tr>");
+    
+    out.println("</table>");
+}
+
+%> <br></br><br></br><br></br> <% 
+
+if("customer_rep".equals(role)){ 
+	
+%>
 Customer Rep! <br><br><br>
 
 Edit User   <br>
