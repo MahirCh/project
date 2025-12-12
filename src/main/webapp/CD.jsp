@@ -252,6 +252,8 @@ if("buyer".equals(type)){
 
     ResultSet rs = ps.executeQuery();
     
+    
+    
     %>
 
     <table border="1">
@@ -259,6 +261,8 @@ if("buyer".equals(type)){
     <%
     while(rs.next()){
     	String aucId= rs.getString("auction_id");
+    	
+    	
     %>
     <tr>
     <td><%= rs.getString("auction_id") %></td>
@@ -325,9 +329,59 @@ if("buyer".equals(type)){
         <button type="submit">Similar Items (same Artist)</button>
     </form>
 </td>
-<td><%= rs.getString("winner_id") %></td>
-    <td><%= rs.getString("winning_bid") %></td>
-    
+
+<%
+// ---------------------------------------------------------
+// WINNER CALCULATION: runs only if auction has ended
+// ---------------------------------------------------------
+Timestamp now = new Timestamp(System.currentTimeMillis());
+Timestamp end = rs.getTimestamp("end_time");
+
+String winnerUser = "Auction Active";
+String winnerBidStr = "—";
+
+try {
+    if (end != null && now.after(end)) {
+
+        String sqlWinner =
+            "SELECT username, bid_amount FROM max_bids WHERE auc_id = ? ORDER BY bid_amount DESC LIMIT 1";
+
+        try (PreparedStatement psW = con.prepareStatement(sqlWinner)) {
+            psW.setInt(1, Integer.parseInt(aucId));
+            ResultSet rsW = psW.executeQuery();
+
+            if (rsW.next()) {
+                winnerUser = rsW.getString("username");
+                double winnerBid = rsW.getDouble("bid_amount");   // <-- FIXED
+                winnerBidStr = "$" + winnerBid;
+
+                // update Auction
+                String sqlUpd =
+                    "UPDATE Auction SET winner_id=?, winning_bid=? WHERE auction_id=?";
+                try (PreparedStatement psU = con.prepareStatement(sqlUpd)) {
+                    psU.setString(1, winnerUser);
+                    psU.setDouble(2, winnerBid);
+                    psU.setInt(3, Integer.parseInt(aucId));
+                    psU.executeUpdate();
+                }
+            } else {
+                winnerUser = "No bids";
+                winnerBidStr = "-";
+            }
+        }
+    }
+} catch (Exception e) {
+    winnerUser = "Error";
+    winnerBidStr = "-";
+    e.printStackTrace(new java.io.PrintWriter(out));
+}
+
+%>
+
+<td><%= winnerUser %></td>
+<td><%= winnerBidStr %></td>
+
+
     </tr>
 <%
     }}
@@ -416,8 +470,44 @@ if("customer_rep".equals(role)){
     <tr><th>Auction ID</th><th>Artist</th><th>Album</th><th>Year</th><th>Condition</th><th>Special_Edition</th><th>Initial Price</th><th>Increment($)</th><th>Start Time</th><th>End Time</th><th>Seller</th><th>Winner</th><th>Winning Bid</th></tr>
     <%
     while(rs.next()){
+    	
     
     	String aucId= rs.getString("auction_id");
+    	// Check if auction has ended
+    	Timestamp endTime = rs.getTimestamp("end_time");
+    	Timestamp nowTime = new Timestamp(System.currentTimeMillis());
+
+    	if (endTime != null && nowTime.after(endTime)) {
+
+    	    String auctionId = rs.getString("auction_id");
+
+    	    // Find highest bid for this auction
+    	    PreparedStatement ps2 = con.prepareStatement(
+    	        "SELECT buyer_username, bid_amount FROM Bid " +
+    	        "WHERE auction_id = ? ORDER BY bid_amount DESC LIMIT 1"
+    	    );
+    	    ps2.setString(1, auctionId);
+    	    ResultSet rs2 = ps2.executeQuery();
+
+    	    if (rs2.next()) {
+    	        String highestUser = rs2.getString("buyer_username");
+    	        double highestBid = rs2.getDouble("bid_amount");
+
+    	        // Update winner in Auction table
+    	        PreparedStatement ps3 = con.prepareStatement(
+    	            "UPDATE Auction SET winner_id = ?, winning_bid = ? WHERE auction_id = ?"
+    	        );
+    	        ps3.setString(1, highestUser);
+    	        ps3.setDouble(2, highestBid);
+    	        ps3.setString(3, auctionId);
+    	        ps3.executeUpdate();
+    	        ps3.close();
+    	    }
+
+    	    rs2.close();
+    	    ps2.close();
+    	}
+
     %>
     <tr>
     <td><%= rs.getString("auction_id") %></td>
