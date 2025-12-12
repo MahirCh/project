@@ -4,10 +4,12 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Insert title here</title>
+<title>About Us</title>
 </head>
 <body>
 <a href='success.jsp'>Home</a>
+
+
 
 </body>
 </html>
