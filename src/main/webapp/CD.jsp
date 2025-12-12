@@ -184,13 +184,13 @@ Class.forName("com.mysql.jdbc.Driver");
 Connection con = DriverManager.getConnection(
 "jdbc:mysql://localhost:3306/projectdb","root","school");
 
-PreparedStatement ps = con.prepareStatement("SELECT a.auction_id, m.artist, m.album_title, m.release_year, m.conditions, cd.special_edition, a.start_price, a.increment, a.start_time, a.end_time, a.seller_username FROM Music m JOIN CD cd ON m.artist = cd.artist AND m.album_title = cd.album_title JOIN Auction a ON m.artist = a.artist AND m.album_title = a.album_title;");
+PreparedStatement ps = con.prepareStatement("SELECT a.winner_id, a.winning_bid, a.auction_id, m.artist, m.album_title, m.release_year, m.conditions, cd.special_edition, a.start_price, a.increment, a.start_time, a.end_time, a.seller_username FROM Music m JOIN CD cd ON m.artist = cd.artist AND m.album_title = cd.album_title JOIN Auction a ON m.artist = a.artist AND m.album_title = a.album_title;");
 
 ResultSet rs = ps.executeQuery();
 %>
 
 <table border="1">
-<tr><th>Auction ID</th><th>Artist</th><th>Album</th><th>Year</th><th>Condition</th><th>Special_Edition</th><th>Initial Price</th><th>Increment($)</th><th>Start Time</th><th>End Time</th><th>Seller</th></tr>
+<tr><th>Auction ID</th><th>Artist</th><th>Album</th><th>Year</th><th>Condition</th><th>Special_Edition</th><th>Initial Price</th><th>Increment($)</th><th>Start Time</th><th>End Time</th><th>Seller</th><th>Winner</th><th>Winning Bid</th></tr>
 <%
 while(rs.next()){
 	String aucId= rs.getString("auction_id");
@@ -208,6 +208,33 @@ while(rs.next()){
 <td><%= rs.getString("start_time") %></td>
 <td><%= rs.getString("end_time") %></td>
 <td><%= rs.getString("seller_username") %></td>
+
+	<td>
+    <!-- BID HISTORY -->
+    <form action="ViewHistory.jsp" method="get" style="display:inline;">
+        <input type="hidden" name="mode" value="bid_history">
+        <input type="hidden" name="auction_id" value="<%= aucId %>">
+        <button type="submit">Bid History</button>
+    </form>
+
+    <!-- USER AUCTION PARTICIPATION -->
+    <form action="ViewHistory.jsp" method="get" style="display:inline;">
+        <input type="hidden" name="mode" value="user_history">
+        <br><br>Username:  
+            <input type="text" name="userz" required><br>
+        <button type="submit">User Auctions</button>
+    </form>
+	<br><br>
+    <!-- SIMILAR ITEMS -->
+    <form action="ViewHistory.jsp" method="get" style="display:inline;">
+        <input type="hidden" name="mode" value="similar_items">
+        <input type="hidden" name="artist" value="<%= rs.getString("artist") %>">
+        <input type="hidden" name="album_title" value="<%= rs.getString("album_title") %>">
+        <button type="submit">Similar Items (same Artist)</button>
+    </form>
+</td>
+<td><%= rs.getString("winner_id") %></td>
+<td><%= rs.getString("winning_bid") %></td>
 </tr>
 
 <%
@@ -221,13 +248,14 @@ if("buyer".equals(type)){
     Connection con = DriverManager.getConnection(
     "jdbc:mysql://localhost:3306/projectdb","root","school");
 
-    PreparedStatement ps = con.prepareStatement("SELECT a.auction_id, m.artist, m.album_title, m.release_year, m.conditions, cd.special_edition, a.start_price, a.increment, a.start_time, a.end_time, a.seller_username FROM Music m JOIN CD cd ON m.artist = cd.artist AND m.album_title = cd.album_title JOIN Auction a ON m.artist = a.artist AND m.album_title = a.album_title;");
+    PreparedStatement ps = con.prepareStatement("SELECT a.winner_id, a.winning_bid, a.auction_id, m.artist, m.album_title, m.release_year, m.conditions, cd.special_edition, a.start_price, a.increment, a.start_time, a.end_time, a.seller_username FROM Music m JOIN CD cd ON m.artist = cd.artist AND m.album_title = cd.album_title JOIN Auction a ON m.artist = a.artist AND m.album_title = a.album_title;");
 
     ResultSet rs = ps.executeQuery();
+    
     %>
 
     <table border="1">
-    <tr><th>Auction ID</th><th>Artist</th><th>Album</th><th>Year</th><th>Condition</th><th>Special Edition</th><th>Initial Price($)</th><th>Increment($)</th><th>Start Time</th><th>End Time</th><th>Seller</th><th>Bid?</th><th>History</th></tr>
+    <tr><th>Auction ID</th><th>Artist</th><th>Album</th><th>Year</th><th>Condition</th><th>Special Edition</th><th>Initial Price($)</th><th>Increment($)</th><th>Start Time</th><th>End Time</th><th>Seller</th><th>Bid?</th><th>Bid History</th><th>Winner</th><th>Winning Bid</th></tr>
     <%
     while(rs.next()){
     	String aucId= rs.getString("auction_id");
@@ -273,7 +301,32 @@ if("buyer".equals(type)){
 
     </div>
 </td>
-	<td>History</td>
+	<td>
+    <!-- BID HISTORY -->
+    <form action="ViewHistory.jsp" method="get" style="display:inline;">
+        <input type="hidden" name="mode" value="bid_history">
+        <input type="hidden" name="auction_id" value="<%= aucId %>">
+        <button type="submit">Bid History</button>
+    </form>
+
+    <!-- USER AUCTION PARTICIPATION -->
+    <form action="ViewHistory.jsp" method="get" style="display:inline;">
+        <input type="hidden" name="mode" value="user_history">
+        <br><br>Username:  
+            <input type="text" name="userz" required><br>
+        <button type="submit">User Auctions</button>
+    </form>
+	<br><br>
+    <!-- SIMILAR ITEMS -->
+    <form action="ViewHistory.jsp" method="get" style="display:inline;">
+        <input type="hidden" name="mode" value="similar_items">
+        <input type="hidden" name="artist" value="<%= rs.getString("artist") %>">
+        <input type="hidden" name="album_title" value="<%= rs.getString("album_title") %>">
+        <button type="submit">Similar Items (same Artist)</button>
+    </form>
+</td>
+<td><%= rs.getString("winner_id") %></td>
+    <td><%= rs.getString("winning_bid") %></td>
     
     </tr>
 <%
@@ -289,13 +342,13 @@ if("admin".equals(role)){
     Connection con = DriverManager.getConnection(
     "jdbc:mysql://localhost:3306/projectdb","root","school");
 
-    PreparedStatement ps = con.prepareStatement("SELECT a.auction_id, m.artist, m.album_title, m.release_year, m.conditions, cd.special_edition, a.start_price, a.increment, a.start_time, a.end_time, a.seller_username FROM Music m JOIN CD cd ON m.artist = cd.artist AND m.album_title = cd.album_title JOIN Auction a ON m.artist = a.artist AND m.album_title = a.album_title;");
+    PreparedStatement ps = con.prepareStatement("SELECT a.winner_id, a.winning_bid, a.auction_id, m.artist, m.album_title, m.release_year, m.conditions, cd.special_edition, a.start_price, a.increment, a.start_time, a.end_time, a.seller_username FROM Music m JOIN CD cd ON m.artist = cd.artist AND m.album_title = cd.album_title JOIN Auction a ON m.artist = a.artist AND m.album_title = a.album_title;");
 
     ResultSet rs = ps.executeQuery();
     %>
 
     <table border="1">
-    <tr><th>Auction ID</th><th>Artist</th><th>Album</th><th>Year</th><th>Condition</th><th>Special_Edition</th><th>Initial Price</th><th>Increment($)</th><th>Start Time</th><th>End Time</th><th>Seller</th></tr>
+    <tr><th>Auction ID</th><th>Artist</th><th>Album</th><th>Year</th><th>Condition</th><th>Special_Edition</th><th>Initial Price</th><th>Increment($)</th><th>Start Time</th><th>End Time</th><th>Seller</th><th>Winner</th><th>Winning Bid</th></tr>
     <%
     while(rs.next()){
     
@@ -314,6 +367,33 @@ if("admin".equals(role)){
     <td><%= rs.getString("start_time") %></td>
     <td><%= rs.getString("end_time") %></td>
     <td><%= rs.getString("seller_username") %></td>
+    
+	<td>
+    <!-- BID HISTORY -->
+    <form action="ViewHistory.jsp" method="get" style="display:inline;">
+        <input type="hidden" name="mode" value="bid_history">
+        <input type="hidden" name="auction_id" value="<%= aucId %>">
+        <button type="submit">Bid History</button>
+    </form>
+
+    <!-- USER AUCTION PARTICIPATION -->
+    <form action="ViewHistory.jsp" method="get" style="display:inline;">
+        <input type="hidden" name="mode" value="user_history">
+        <br><br>Username:  
+            <input type="text" name="userz" required><br>
+        <button type="submit">User Auctions</button>
+    </form>
+	<br><br>
+    <!-- SIMILAR ITEMS -->
+    <form action="ViewHistory.jsp" method="get" style="display:inline;">
+        <input type="hidden" name="mode" value="similar_items">
+        <input type="hidden" name="artist" value="<%= rs.getString("artist") %>">
+        <input type="hidden" name="album_title" value="<%= rs.getString("album_title") %>">
+        <button type="submit">Similar Items (same Artist)</button>
+    </form>
+</td>
+    <td><%= rs.getString("winner_id") %></td>
+<td><%= rs.getString("winning_bid") %></td>
     </tr>
 
     <%
@@ -327,13 +407,13 @@ if("customer_rep".equals(role)){
     Connection con = DriverManager.getConnection(
     "jdbc:mysql://localhost:3306/projectdb","root","school");
 
-    PreparedStatement ps = con.prepareStatement("SELECT a.auction_id, m.artist, m.album_title, m.release_year, m.conditions, cd.special_edition, a.start_price, a.increment, a.start_time, a.end_time, a.seller_username FROM Music m JOIN CD cd ON m.artist = cd.artist AND m.album_title = cd.album_title JOIN Auction a ON m.artist = a.artist AND m.album_title = a.album_title;");
+    PreparedStatement ps = con.prepareStatement("SELECT a.winner_id, a.winning_bid, a.auction_id, m.artist, m.album_title, m.release_year, m.conditions, cd.special_edition, a.start_price, a.increment, a.start_time, a.end_time, a.seller_username FROM Music m JOIN CD cd ON m.artist = cd.artist AND m.album_title = cd.album_title JOIN Auction a ON m.artist = a.artist AND m.album_title = a.album_title;");
 
     ResultSet rs = ps.executeQuery();
     %>
 
     <table border="1">
-    <tr><th>Auction ID</th><th>Artist</th><th>Album</th><th>Year</th><th>Condition</th><th>Special_Edition</th><th>Initial Price</th><th>Increment($)</th><th>Start Time</th><th>End Time</th><th>Seller</th></tr>
+    <tr><th>Auction ID</th><th>Artist</th><th>Album</th><th>Year</th><th>Condition</th><th>Special_Edition</th><th>Initial Price</th><th>Increment($)</th><th>Start Time</th><th>End Time</th><th>Seller</th><th>Winner</th><th>Winning Bid</th></tr>
     <%
     while(rs.next()){
     
@@ -352,6 +432,33 @@ if("customer_rep".equals(role)){
     <td><%= rs.getString("start_time") %></td>
     <td><%= rs.getString("end_time") %></td>
     <td><%= rs.getString("seller_username") %></td>
+    
+	<td>
+    <!-- BID HISTORY -->
+    <form action="ViewHistory.jsp" method="get" style="display:inline;">
+        <input type="hidden" name="mode" value="bid_history">
+        <input type="hidden" name="auction_id" value="<%= aucId %>">
+        <button type="submit">Bid History</button>
+    </form>
+
+    <!-- USER AUCTION PARTICIPATION -->
+    <form action="ViewHistory.jsp" method="get" style="display:inline;">
+        <input type="hidden" name="mode" value="user_history">
+        <br><br>Username:  
+            <input type="text" name="userz" required><br>
+        <button type="submit">User Auctions</button>
+    </form>
+	<br><br>
+    <!-- SIMILAR ITEMS -->
+    <form action="ViewHistory.jsp" method="get" style="display:inline;">
+        <input type="hidden" name="mode" value="similar_items">
+        <input type="hidden" name="artist" value="<%= rs.getString("artist") %>">
+        <input type="hidden" name="album_title" value="<%= rs.getString("album_title") %>">
+        <button type="submit">Similar Items (same Artist)</button>
+    </form>
+</td>
+    <td><%= rs.getString("winner_id") %></td>
+<td><%= rs.getString("winning_bid") %></td>
     </tr>
 
     <%
