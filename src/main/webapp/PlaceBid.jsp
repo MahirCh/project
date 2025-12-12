@@ -1,30 +1,47 @@
 <%@ page import="java.sql.*" %>
-<%@ page import="java.text.*" %>
+<%@ page import="java.time.*" %>
+<%@ page import="java.time.format.*" %>
 <%
-request.setCharacterEncoding("UTF-8");
+/*
+PlaceBid.jsp
 
-String aucIdStr = request.getParameter("auction_id");
-String bidder = (String) session.getAttribute("user"); // must match how you store session username
-String bidAmtStr = request.getParameter("bid_amount");
-String upperStr = request.getParameter("upper_limit"); // match your form name
+Expected POST form fields:
+ - auction_id
+ - bid_amount
+ - upper_limit   (optional)  <-- buyer's max auto-bid
 
-if (aucIdStr == null || bidAmtStr == null || bidder == null) {
-    out.println("<h3>Missing parameter(s). auction_id, bid_amount and logged-in user are required.</h3>");
+Session:
+ - username or user (the logged-in buyer username)
+
+Assumptions about DB schema (adjust if needed):
+ - auction(auction_id INT PK, start_price DOUBLE, increment DOUBLE, reserve_price DOUBLE, start_time DATETIME, end_time DATETIME, winner_id VARCHAR(...), winning_bid DOUBLE, seller_username ...)
+ - bid(bid_id AUTO_INC PK, auc_id INT, username VARCHAR(...), bid_amount DOUBLE, bid_time TIMESTAMP)
+ - auto_bid(auto_bid_id AUTO_INC PK, auction_id INT, bidder_username VARCHAR(...), max_bid DECIMAL)
+ - alert(alert_id AUTO_INC PK, username VARCHAR(...), auc_id INT, message TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, is_read BOOLEAN DEFAULT FALSE)
+*/
+
+String auctionIdStr = request.getParameter("auction_id");
+String bidder = (String) session.getAttribute("username");
+if (bidder == null) bidder = (String) session.getAttribute("user");
+
+if (auctionIdStr == null || auctionIdStr.trim().isEmpty() || bidder == null) {
+    out.println("<h3>Missing parameters or not logged in.</h3>");
     return;
 }
 
-int aucId = 0;
+int aucId = Integer.parseInt(auctionIdStr);
 double bidAmount = 0.0;
-Double upperLimit = null;
 try {
-    aucId = Integer.parseInt(aucIdStr);
-    bidAmount = Double.parseDouble(bidAmtStr);
-    if (upperStr != null && !upperStr.trim().isEmpty()) {
-        upperLimit = Double.parseDouble(upperStr);
-    }
+    bidAmount = Double.parseDouble(request.getParameter("bid_amount"));
 } catch(Exception ex) {
-    out.println("<h3>Invalid numeric parameter: " + ex.getMessage() + "</h3>");
+    out.println("<h3>Invalid bid amount.</h3>");
     return;
+}
+
+String maxStr = request.getParameter("upper_limit");
+Double maxBid = null;
+if (maxStr != null && !maxStr.trim().isEmpty()) {
+    try { maxBid = Double.parseDouble(maxStr); } catch(Exception ex) { maxBid = null; }
 }
 
 Connection con = null;
@@ -33,22 +50,9 @@ ResultSet rs = null;
 
 try {
     Class.forName("com.mysql.jdbc.Driver");
-    con = DriverManager.getConnection("jdbc:mysql://localhost:3306/projectdb", "root", "school");
-    con.setAutoCommit(false); // transactional
+    con = DriverManager.getConnection("jdbc:mysql://localhost:3306/projectdb","root","school");
 
-    // --- sanity check: ensure bidder exists in eu_account (or buyer) ---
-    ps = con.prepareStatement("SELECT username FROM eu_account WHERE username=?");
-    ps.setString(1, bidder);
-    rs = ps.executeQuery();
-    if (!rs.next()) {
-        rs.close(); ps.close();
-        con.rollback();
-        out.println("<h3>Bidder account not found: " + bidder + "</h3>");
-        return;
-    }
-    rs.close(); ps.close();
-
-    // --- 1) Insert manual bid ---
+    // Insert the immediate bid
     ps = con.prepareStatement(
         "INSERT INTO bid (auc_id, username, bid_amount, bid_time) VALUES (?, ?, ?, NOW())"
     );
@@ -58,119 +62,168 @@ try {
     ps.executeUpdate();
     ps.close();
 
-    // --- 2) Upsert auto_bid limit if provided (delete then insert) ---
-    if (upperLimit != null && upperLimit > bidAmount) {
+    // Save or update auto bid record
+    if (maxBid != null && maxBid > bidAmount) {
         ps = con.prepareStatement("DELETE FROM auto_bid WHERE auction_id=? AND bidder_username=?");
         ps.setInt(1, aucId);
         ps.setString(2, bidder);
         ps.executeUpdate();
         ps.close();
 
-        ps = con.prepareStatement("INSERT INTO auto_bid (auction_id, bidder_username, max_bid) VALUES (?, ?, ?)");
+        ps = con.prepareStatement(
+            "INSERT INTO auto_bid (auction_id, bidder_username, max_bid) VALUES (?, ?, ?)"
+        );
         ps.setInt(1, aucId);
         ps.setString(2, bidder);
-        ps.setDouble(3, upperLimit);
+        ps.setDouble(3, maxBid);
         ps.executeUpdate();
         ps.close();
     }
 
-    // --- 3) Get increment from Auction with FOR UPDATE to lock the auction row ---
-    ps = con.prepareStatement("SELECT increment FROM auction WHERE auction_id = ? FOR UPDATE");
+    double increment = 1.0;
+    ps = con.prepareStatement("SELECT increment, end_time, reserve_price FROM auction WHERE auction_id=?");
     ps.setInt(1, aucId);
     rs = ps.executeQuery();
-    double increment = 1.0;
-    if (rs.next()) increment = rs.getDouble("increment");
-    rs.close(); ps.close();
+    Timestamp endTs = null;
+    Double reservePrice = null;
+    if (rs.next()) {
+        increment = rs.getDouble("increment");
+        endTs = rs.getTimestamp("end_time");
+        reservePrice = rs.getObject("reserve_price") != null ? rs.getDouble("reserve_price") : null;
+    } else {
+        out.println("<h3>Auction not found.</h3>");
+        return;
+    }
+    rs.close();
+    ps.close();
 
-    // --- 4) Auto-bid competition loop (repeat until no change) ---
+    // Auto bid competition
     boolean changed = true;
-    String currentTopUser = null;
-    double currentTopBid = 0.0;
-
     while (changed) {
         changed = false;
 
-        // a) fetch current highest bid for this auction
         ps = con.prepareStatement(
-            "SELECT username, bid_amount FROM bid WHERE auc_id = ? ORDER BY bid_amount DESC, bid_time ASC LIMIT 1 FOR UPDATE"
+            "SELECT username, bid_amount FROM bid WHERE auc_id=? ORDER BY bid_amount DESC, bid_time ASC LIMIT 1"
         );
         ps.setInt(1, aucId);
         rs = ps.executeQuery();
+
+        String topUser = null;
+        double topBid = 0.0;
         if (rs.next()) {
-            currentTopUser = rs.getString("username");
-            currentTopBid = rs.getDouble("bid_amount");
-        } else {
-            // Shouldn't happen because we inserted the manual bid; but guard
-            currentTopUser = bidder;
-            currentTopBid = bidAmount;
+            topUser = rs.getString("username");
+            topBid = rs.getDouble("bid_amount");
         }
-        rs.close(); ps.close();
+        rs.close();
+        ps.close();
 
-        // b) scan all auto-bidders except current top user, sorted by max_bid DESC
         ps = con.prepareStatement(
-            "SELECT bidder_username, max_bid FROM auto_bid WHERE auction_id = ? AND bidder_username <> ? ORDER BY max_bid DESC"
+            "SELECT bidder_username, max_bid FROM auto_bid WHERE auction_id=? AND bidder_username<>? ORDER BY max_bid DESC"
         );
         ps.setInt(1, aucId);
-        ps.setString(2, currentTopUser == null ? "" : currentTopUser);
+        ps.setString(2, topUser == null ? "" : topUser);
         rs = ps.executeQuery();
 
+        boolean challengerPlaced = false;
         while (rs.next()) {
             String challenger = rs.getString("bidder_username");
             double challengerMax = rs.getDouble("max_bid");
 
-            // can challenger outbid current top?
-            if (challengerMax >= currentTopBid + increment) {
-                double newBid = Math.min(challengerMax, currentTopBid + increment);
+            if (challengerMax >= topBid + increment) {
+                double newBid = Math.min(challengerMax, topBid + increment);
 
-                // insert auto-generated bid for challenger
-                PreparedStatement psIns = con.prepareStatement(
+                PreparedStatement ps2 = con.prepareStatement(
                     "INSERT INTO bid (auc_id, username, bid_amount, bid_time) VALUES (?, ?, ?, NOW())"
                 );
-                psIns.setInt(1, aucId);
-                psIns.setString(2, challenger);
-                psIns.setDouble(3, newBid);
-                psIns.executeUpdate();
-                psIns.close();
+                ps2.setInt(1, aucId);
+                ps2.setString(2, challenger);
+                ps2.setDouble(3, newBid);
+                ps2.executeUpdate();
+                ps2.close();
 
-                // mark changed so loop repeats and picks up new top
-                changed = true;
-                // break out of scanning challengers to let loop refresh the highest bid
-                // (this mimics real-time iterative bidding)
+                challengerPlaced = true;
                 break;
             }
         }
-        rs.close(); ps.close();
+        rs.close();
+        ps.close();
+
+        if (challengerPlaced) changed = true;
     }
 
-    // commit all bid changes
-    con.commit();
-
-    // fetch final highest to display
-    ps = con.prepareStatement("SELECT username, bid_amount FROM bid WHERE auc_id = ? ORDER BY bid_amount DESC, bid_time ASC LIMIT 1");
+    // Fetch final highest bid
+    ps = con.prepareStatement(
+        "SELECT username, bid_amount FROM bid WHERE auc_id=? ORDER BY bid_amount DESC, bid_time ASC LIMIT 1"
+    );
     ps.setInt(1, aucId);
     rs = ps.executeQuery();
-    String finalUser = bidder;
-    double finalAmount = bidAmount;
-    if (rs.next()) {
-        finalUser = rs.getString("username");
-        finalAmount = rs.getDouble("bid_amount");
-    }
-    rs.close(); ps.close();
 
-    out.println("<h2>Bid Placed!</h2>");
-    out.println("<p>Highest bidder now: <b>" + finalUser + "</b></p>");
-    out.println("<p>Highest bid: <b>$" + new java.text.DecimalFormat("#0.00").format(finalAmount) + "</b></p>");
-    out.println("<p><a href='success.jsp'>Return</a></p>");
+    String finalTopUser = null;
+    double finalTopBid = 0.0;
+    if (rs.next()) {
+        finalTopUser = rs.getString("username");
+        finalTopBid = rs.getDouble("bid_amount");
+    }
+    rs.close();
+    ps.close();
+
+    // Auction closed check
+    boolean auctionClosed = false;
+    if (endTs != null) {
+        Timestamp now = new Timestamp(System.currentTimeMillis());
+        if (!now.before(endTs)) auctionClosed = true;
+    }
+
+    if (auctionClosed) {
+
+        if (reservePrice != null && finalTopBid < reservePrice) {
+            ps = con.prepareStatement("UPDATE auction SET winner_id = NULL, winning_bid = NULL WHERE auction_id = ?");
+            ps.setInt(1, aucId);
+            ps.executeUpdate();
+            ps.close();
+
+            out.println("<h2>Auction closed - no winner (reserve price not met).</h2>");
+        } else {
+
+            if (finalTopUser != null) {
+                ps = con.prepareStatement("UPDATE auction SET winner_id = ?, winning_bid = ? WHERE auction_id = ?");
+                ps.setString(1, finalTopUser);
+                ps.setDouble(2, finalTopBid);
+                ps.setInt(3, aucId);
+                ps.executeUpdate();
+                ps.close();
+
+                ps = con.prepareStatement("INSERT INTO alert (username, auc_id, message) VALUES (?, ?, ?)");
+                ps.setString(1, finalTopUser);
+                ps.setInt(2, aucId);
+                ps.setString(3, "Congratulations! You won auction #" + aucId + " with a bid of $" + finalTopBid);
+                ps.executeUpdate();
+                ps.close();
+
+                out.println("<h2>Auction closed - winner: " + finalTopUser + " ($" + finalTopBid + ")</h2>");
+                out.println("<p>An alert has been created for the winner.</p>");
+            } else {
+                out.println("<h2>Auction closed - no bids placed.</h2>");
+            }
+        }
+
+    } else {
+        out.println("<h2>Bid placed!</h2>");
+        out.println("<p>Current highest bidder: " + (finalTopUser == null ? "none" : finalTopUser) + "</p>");
+        out.println("<p>Current highest bid: $" + finalTopBid + "</p>");
+    }
+
+    out.println("<p><a href='success.jsp'>Back home</a></p>");
 
 } catch (Exception e) {
-    try { if (con != null) con.rollback(); } catch(Exception ex) {}
     out.println("<h3>Error: " + e.getMessage() + "</h3>");
     java.io.StringWriter sw = new java.io.StringWriter();
-    e.printStackTrace(new java.io.PrintWriter(sw));
-    out.println("<pre>" + sw.toString() + "</pre>");
+    java.io.PrintWriter pw = new java.io.PrintWriter(sw);
+    e.printStackTrace(pw);
+    out.println("<pre>"+sw.toString()+"</pre>");
 } finally {
-    try { if (rs != null) rs.close(); } catch(Exception ex) {}
-    try { if (ps != null) ps.close(); } catch(Exception ex) {}
-    try { if (con != null) con.close(); } catch(Exception ex) {}
+    try { if (rs != null) rs.close(); } catch(Exception x) {}
+    try { if (ps != null) ps.close(); } catch(Exception x) {}
+    try { if (con != null) con.close(); } catch(Exception x) {}
 }
 %>
